@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TV Launcher</string>
+    <string name="home_key_service">TV Launcher Home-Taste</string>
+    <string name="home_key_service_desc">Öffnet beim Drücken der Home-Taste den TV Launcher statt der Google-TV-Startseite.</string>
+</resources>
