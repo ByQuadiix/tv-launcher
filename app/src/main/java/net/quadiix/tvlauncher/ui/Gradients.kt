@@ -58,7 +58,8 @@ object Gradients {
         val paint = Paint().apply {
             shader = LinearGradient(
                 0f, 0f, w.toFloat(), h.toFloat(),
-                intArrayOf(0xFF1C1F26.toInt(), 0xFF2B3038.toInt(), 0xFF15171C.toInt()),
+                // Tiefes Anthrazit (#121214 … #1C1C1E) laut Spezifikation
+                intArrayOf(0xFF1C1C1E.toInt(), 0xFF18181A.toInt(), 0xFF121214.toInt()),
                 null, Shader.TileMode.CLAMP,
             )
             isDither = true

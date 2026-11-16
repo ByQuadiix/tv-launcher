@@ -34,22 +34,6 @@ class Prefs(context: Context) {
             sp.edit { putString("device_id", it) }
         }
 
-    var weatherEnabled: Boolean
-        get() = sp.getBoolean("weather_enabled", true)
-        set(v) = sp.edit { putBoolean("weather_enabled", v) }
-
-    var weatherCity: String?
-        get() = sp.getString("weather_city", null)
-        set(v) = sp.edit { putString("weather_city", v) }
-
-    var weatherLat: Double?
-        get() = sp.getString("weather_lat", null)?.toDoubleOrNull()
-        set(v) = sp.edit { putString("weather_lat", v?.toString()) }
-
-    var weatherLon: Double?
-        get() = sp.getString("weather_lon", null)?.toDoubleOrNull()
-        set(v) = sp.edit { putString("weather_lon", v?.toString()) }
-
     /** "jellyfin" = Hintergrund des ausgewählten Titels, "gradient" = Farbverlauf, "custom" = eigenes Bild. */
     var wallpaperMode: String
         get() = sp.getString("wallpaper_mode", "jellyfin") ?: "jellyfin"

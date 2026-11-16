@@ -3,15 +3,18 @@
 Werbefreier Launcher für den Xiaomi TV S Mini LED 2025 (Google TV, Android 14) mit Jellyfin auf der Startseite.
 
 ## Funktionen
-Design angelehnt an Apple TV (eigene Umsetzung, keine Apple-Grafiken):
-- Großer Bereich oben mit Filmbild, Titel-Logo, Infozeile (Jahr · Freigabe · Dauer · Bewertung) und Beschreibung
-  des ausgewählten Titels; Uhr, Wetter und Einstellungen als Pillen oben rechts (blenden beim Scrollen aus)
-- Glas-Dock mit den Favoriten: bei einer App **OK gedrückt halten** → „Zu Favoriten hinzufügen“, verschieben, App-Info, Deinstallieren
-- Jellyfin-Reihen: Weiterschauen (Logo, Fortschritt, Restzeit im Bild), Nächste Folgen, Neu hinzugefügt (Poster), Mediathek
-  → ein Klick öffnet den Titel direkt in der Jellyfin-App
-- Einstellungen zweispaltig (großer Titel links, Liste rechts)
-- Hintergrund: Bild des ausgewählten Jellyfin-Titels, Farbverlauf, eigenes Bild (URL oder Datei)
-- Anmeldung bei Jellyfin per **Quick Connect** (Code am Handy bestätigen) oder Benutzername/Passwort
+Design nach der tvOS-Spezifikation (eigene Umsetzung, keine Apple-Grafiken oder -Schriften):
+- **Aufbau:** obere ~60 % frei für den Hintergrund, unten nur Dock und Apps. Die ausgewählte Reihe steht
+  immer auf derselben Höhe, Reihen darüber blenden aus – höchstens 1–2 Reihen sichtbar.
+- **Top Shelf:** Nur wenn Jellyfin im Dock ausgewählt ist, erscheinen oben Logo, Infos und eine Reihe
+  „Weiterschauen & Neu“ (Weiterschauen, nächste Folgen, neu hinzugefügt). Ein Klick öffnet den Titel in der Jellyfin-App.
+- **Ambient-Hintergrund:** bei anderen Apps eine stark weichgezeichnete, entsättigte Fassung der ausgewählten Kachel.
+- **Milchglas-Dock** mit den Favoriten (OK lang drücken → hinzufügen, verschieben, App-Info, Deinstallieren).
+- **Fokus ohne Rahmen:** gefederte Vergrößerung (1,07×), weicher Schatten, feiner Lichtrand; nicht ausgewählte
+  Banner leicht abgedunkelt; App-Namen nur unter der ausgewählten Kachel (60 %).
+- **Statusleiste:** nur eine dezente Uhr. Einstellungen über die Kachel am Ende der Apps oder „OK lang drücken“.
+- **Zoom beim App-Start** aus der Kachel heraus; Bilder der Shelf werden vorab geladen.
+- Anmeldung bei Jellyfin per **Quick Connect** oder Benutzername/Passwort.
 
 ## Bauen und installieren
 ```powershell
@@ -27,7 +30,8 @@ Design angelehnt an Apple TV (eigene Umsetzung, keine Apple-Grafiken):
 | Release + R8 + Vorkompilierung | 19 % | 29 ms |
 | + weniger Vollbild-Schichten (altes, schlichtes Design) | 3 % | 13 ms |
 | Apple-TV-Design, erste Version | 15 % | 34 ms |
-| Apple-TV-Design optimiert (aktuell) | **~9 %** | **~23 ms** (GPU ~15 ms) |
+| Apple-TV-Design optimiert | ~9 % | ~23 ms (GPU ~15 ms) |
+| tvOS-Spezifikation (aktuell) | **~3 %** | GPU ~20 ms |
 
 Wichtig für künftige Änderungen (gemessen auf dem MediaTek MT5896):
 - Die GPU schafft bei 1080p nur ~2 Vollbild-Schichten pro Bild. Keine zusätzlichen bildschirmfüllenden
@@ -37,6 +41,10 @@ Wichtig für künftige Änderungen (gemessen auf dem MediaTek MT5896):
 - Flächen unter Bildern weglassen (`FocusCard(background = Color.Transparent)`), Rahmen nur bei Fokus.
 - Fotos werden über Coil als RGB_565 geladen (`LauncherApp.kt`), das halbiert die Speicherbandbreite.
 - Nach jeder Installation schaltet Xiaomi die Bedienungshilfe ab – `build.ps1` schaltet sie wieder ein.
+- **Keine Echtzeit-Unschärfe (RenderEffect).** Milchglas und Ambient nutzen winzige, vorab weichgezeichnete
+  Bitmaps (`Images.soften`), Farbton fest eingerechnet (`Images.tone`) statt Farbfilter pro Bild.
+- Hintergrund-Überblendung: altes Bild deckend liegen lassen, nur das neue mit Bild-Alpha darüber
+  (keine `Crossfade`-Ebenen), und erst nach ~0,3 s Verweilen wechseln.
 Hinweis: `build.ps1` setzt JDK 21 und einen eigenen Temp-Pfad für Java, weil der Benutzer-Temp-Ordner
 ein Leerzeichen enthält und Gradle sonst mit „Unable to establish loopback connection“ abbricht.
 

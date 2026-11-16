@@ -54,11 +54,8 @@ fun SettingsScreen(vm: LauncherViewModel) {
     val server by vm.jfServer.collectAsState()
     val jfMessage by vm.jfMessage.collectAsState()
     val qcCode by vm.quickConnectCode.collectAsState()
-    val weatherEnabled by vm.weatherEnabled.collectAsState()
-    val city by vm.weatherCity.collectAsState()
     val mode by vm.wallpaperMode.collectAsState()
     val wallUrl by vm.wallpaperUrl.collectAsState()
-    var weatherMsg by remember { mutableStateOf<String?>(null) }
 
     val first = remember { FocusRequester() }
     val full = Modifier.fillMaxWidth()
@@ -86,10 +83,10 @@ fun SettingsScreen(vm: LauncherViewModel) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Text("⚙", fontSize = 110.sp, color = Color.White.copy(alpha = 0.85f))
-            Spacer(Modifier.height(8.dp))
-            Text("Einstellungen", fontSize = 30.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-            Text("TV Launcher 1.0", fontSize = 13.sp, color = Color.White.copy(alpha = 0.5f))
+            Text("⚙", fontSize = 104.sp, color = Palette.TextSecondary)
+            Spacer(Modifier.height(10.dp))
+            Text("Einstellungen", style = AiryText, fontSize = 28.sp, fontWeight = FontWeight.Medium, color = Palette.TextPrimary)
+            Text("TV Launcher 1.1", style = AiryText, fontSize = 13.sp, color = Color.White.copy(alpha = 0.4f))
         }
         // Rechts: die Liste
         Column(
@@ -113,10 +110,10 @@ fun SettingsScreen(vm: LauncherViewModel) {
                 val code = qcCode
                 if (code != null) {
                     Column(
-                        full.background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp)).padding(18.dp)
+                        full.background(Palette.Glass, RoundedCornerShape(16.dp)).padding(18.dp)
                     ) {
                         Text("Quick-Connect-Code", fontSize = 14.sp, color = Color.White.copy(alpha = 0.7f))
-                        Text(code, fontSize = 42.sp, fontWeight = FontWeight.Bold, letterSpacing = 6.sp, color = Color.White)
+                        Text(code, fontSize = 42.sp, fontWeight = FontWeight.Medium, letterSpacing = 6.sp, color = Palette.TextPrimary)
                         Text(
                             "Öffne Jellyfin am Handy oder PC → Benutzer-Menü → Einstellungen → Quick Connect " +
                                 "und gib diesen Code ein. Der Fernseher meldet sich dann automatisch an.",
@@ -139,21 +136,6 @@ fun SettingsScreen(vm: LauncherViewModel) {
                 }
             }
             jfMessage?.let { Info(it) }
-
-            // ---------------- Wetter
-            Header("Wetter")
-            TvButton("Wetter anzeigen", full, value = if (weatherEnabled) "An" else "Aus") {
-                vm.setWeatherEnabled(!weatherEnabled)
-            }
-            TvButton("Ort", full, value = city ?: "nicht festgelegt") {
-                showTextPrompt(ctx, "Ort für das Wetter (z. B. München)", city ?: "") { name ->
-                    scope.launch {
-                        weatherMsg = "Suche …"
-                        weatherMsg = vm.setWeatherCity(name) ?: "Ort gespeichert"
-                    }
-                }
-            }
-            weatherMsg?.let { Info(it) }
 
             // ---------------- Hintergrund
             Header("Hintergrund")
@@ -181,7 +163,7 @@ fun SettingsScreen(vm: LauncherViewModel) {
 
             // ---------------- System
             Header("System")
-            Info("Die Home-Taste öffnet diesen Launcher über die Bedienungshilfe „TV Launcher Home-Taste“.")
+            Info("Die Home-Taste öffnet diesen Launcher über die Bedienungshilfe „TV Launcher Home-Taste“. Diese Einstellungen erreichst du über die Kachel am Ende der Apps oder „OK lang drücken“ auf einer App.")
             TvButton("Bedienungshilfen", full) {
                 startSafely(ctx, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
@@ -200,12 +182,12 @@ private fun Header(text: String, first: Boolean = false) {
         fontSize = 13.sp,
         fontWeight = FontWeight.SemiBold,
         letterSpacing = 1.2.sp,
-        color = Color.White.copy(alpha = 0.55f),
+        color = Palette.TextSecondary,
         modifier = Modifier.padding(start = 6.dp, top = if (first) 0.dp else 22.dp, bottom = 2.dp),
     )
 }
 
 @Composable
 private fun Info(text: String) {
-    Text(text, fontSize = 13.sp, color = Color.White.copy(alpha = 0.65f), modifier = Modifier.padding(horizontal = 6.dp))
+    Text(text, style = AiryText, fontSize = 13.sp, color = Palette.TextSecondary, modifier = Modifier.padding(horizontal = 6.dp))
 }

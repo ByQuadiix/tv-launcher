@@ -31,15 +31,19 @@ object AppRepository {
                 .setClassName(pkg, ai.name)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
 
-            val banner = runCatching {
-                (ai.loadBanner(pm) ?: ai.applicationInfo.loadBanner(pm))
-                    ?.toBitmap(320, 180)?.asImageBitmap()
+            val bannerBmp = runCatching {
+                (ai.loadBanner(pm) ?: ai.applicationInfo.loadBanner(pm))?.toBitmap(320, 180)
             }.getOrNull()
-            val icon = if (banner == null) {
-                runCatching { ri.loadIcon(pm).toBitmap(192, 192).asImageBitmap() }.getOrNull()
+            val iconBmp = if (bannerBmp == null) {
+                runCatching { ri.loadIcon(pm).toBitmap(192, 192) }.getOrNull()
             } else null
+            // Mini-Fassung für den weichgezeichneten Ambient-Hintergrund (einmalig hier im IO-Thread)
+            val ambient = (bannerBmp ?: iconBmp)?.let { runCatching { Images.soften(it) }.getOrNull() }
 
-            result += AppEntry(pkg, ri.loadLabel(pm).toString(), banner, icon, intent)
+            result += AppEntry(
+                pkg, ri.loadLabel(pm).toString(),
+                bannerBmp?.asImageBitmap(), iconBmp?.asImageBitmap(), intent, ambient,
+            )
         }
 
         leanback.forEach { add(it, true) }

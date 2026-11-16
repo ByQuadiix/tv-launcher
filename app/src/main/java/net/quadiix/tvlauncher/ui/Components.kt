@@ -1,8 +1,9 @@
 package net.quadiix.tvlauncher.ui
 
 import android.view.KeyEvent as AndroidKeyEvent
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -10,8 +11,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -21,20 +20,64 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
+// ---------------------------------------------------------------- Farben & Schrift (tvOS-artig)
+
+/** Ruhige Graustufen statt hartem Schwarz-Weiß. */
+object Palette {
+    val Background = Color(0xFF121214)
+    val Surface = Color(0xFF1C1C1E)
+    val TextPrimary = Color.White.copy(alpha = 0.85f)
+    val TextSecondary = Color.White.copy(alpha = 0.60f)
+    val Glass = Color.White.copy(alpha = 0.08f)
+    val GlassEdge = Color.White.copy(alpha = 0.10f)
+}
+
+/** Leicht erhöhter Zeichenabstand (0,02 em), keine schweren Fettschnitte. */
+val AiryText = TextStyle(letterSpacing = 0.02.em)
+
+/** Nicht ausgewählte App-Banner leicht abdunkeln, damit grelle Logos die Ruhe nicht stören. */
+val UnfocusedDim: ColorFilter = ColorFilter.colorMatrix(
+    ColorMatrix(
+        floatArrayOf(
+            0.78f, 0f, 0f, 0f, 0f,
+            0f, 0.78f, 0f, 0f, 0f,
+            0f, 0f, 0.78f, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f,
+        )
+    ).apply { timesAssign(ColorMatrix().apply { setToSaturation(0.85f) }) }
+)
+
+/** Gefederte Fokus-Animation ohne Nachschwingen (Spezifikation: NoBouncy, MediumLow). */
+private val FocusSpring = spring<Float>(
+    dampingRatio = Spring.DampingRatioNoBouncy,
+    stiffness = Spring.StiffnessMediumLow,
+)
+
+// ---------------------------------------------------------------- Fernbedienung
 
 /**
  * OK-Taste der Fernbedienung: kurz drücken = [onClick], gedrückt halten (oder Menü-Taste) = [onLongClick].
@@ -86,40 +129,51 @@ fun Modifier.dpadClickable(
     }
 }
 
-/** Kachel, die beim Fokussieren größer wird und einen weißen Rahmen bekommt. */
+// ---------------------------------------------------------------- Kachel
+
+/**
+ * Kachel im tvOS-Stil: Fokus nur über sanfte Vergrößerung (Feder), einen weichen Schlagschatten und
+ * einen feinen hellen Innenrand – kein harter Rahmen. [onClick] bekommt die Position der Kachel auf dem
+ * Bildschirm, damit eine App aus der Kachel heraus „aufgezoomt“ werden kann.
+ */
 @Composable
 fun FocusCard(
     width: Dp,
     height: Dp,
     modifier: Modifier = Modifier,
-    onClick: () -> Unit,
+    onClick: (bounds: Rect) -> Unit,
     onLongClick: (() -> Unit)? = null,
     onFocused: () -> Unit = {},
     onFocusChange: (Boolean) -> Unit = {},
-    corner: Dp = 14.dp,
-    focusScale: Float = 1.1f,
-    background: Color = Color(0xFF2A2A30),
+    corner: Dp = 18.dp,
+    focusScale: Float = 1.07f,
+    background: Color = Palette.Surface,
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) focusScale else 1f, tween(140), label = "cardScale")
+    var bounds by remember { mutableStateOf(Rect.Zero) }
+    val progress by animateFloatAsState(if (focused) 1f else 0f, FocusSpring, label = "focus")
     val cardShape = remember(corner) { RoundedCornerShape(corner) }
+    val elevationPx = with(LocalDensity.current) { 22.dp.toPx() }
+
     Box(
         modifier
             .size(width, height)
-            // Nur Skalieren über die GPU-Ebene; der frühere Schatten wurde bei jedem Animationsschritt
-            // neu berechnet und war auf der schwachen TV-GPU teuer.
+            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            // Alles über die GPU-Ebene: Skalierung und Schatten. Der Schatten entsteht nur an der
+            // ausgewählten Kachel (Elevation 0 = kein Schatten), damit die TV-GPU nicht überlastet wird.
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.shape = cardShape
+                val s = 1f + (focusScale - 1f) * progress
+                scaleX = s
+                scaleY = s
+                shadowElevation = elevationPx * progress
+                ambientShadowColor = Color.Black
+                spotShadowColor = Color.Black
+                shape = cardShape
                 clip = true
             }
-            // Fläche und Rahmen nur zeichnen, wenn sie sichtbar sind – jede überflüssige Fläche kostet
-            // auf der TV-GPU messbar Zeit (Karten mit Bild bekommen Color.Transparent).
             .then(if (background.alpha > 0f) Modifier.background(background) else Modifier)
-            .then(if (focused) Modifier.border(2.dp, Color.White.copy(alpha = 0.9f), cardShape) else Modifier)
-            .dpadClickable(onClick, onLongClick)
+            .dpadClickable({ onClick(bounds) }, onLongClick)
             .onFocusChanged {
                 if (focused != it.isFocused) onFocusChange(it.isFocused)
                 focused = it.isFocused
@@ -128,12 +182,21 @@ fun FocusCard(
             .focusable(),
     ) {
         content(focused)
+        // Feiner heller Innenrand (Specular Highlight) – nur sichtbar, solange die Kachel ausgewählt ist
+        if (progress > 0.02f) {
+            Box(
+                Modifier.matchParentSize()
+                    .border(1.5.dp, Color.White.copy(alpha = 0.18f * progress), cardShape)
+            )
+        }
     }
 }
 
+// ---------------------------------------------------------------- Listenzeile
+
 /**
- * Listenzeile für Menüs und Einstellungen: ausgewählt weiß mit dunkler Schrift und leicht vergrößert.
- * [value] erscheint rechtsbündig (z. B. "An"), [selected] zeigt ein Häkchen.
+ * Listenzeile für Menüs und Einstellungen. Ausgewählt: etwas heller und leicht vergrößert –
+ * bewusst ohne harten Weiß-Schwarz-Kontrast. [value] steht rechtsbündig, [selected] zeigt ein Häkchen.
  */
 @Composable
 fun TvButton(
@@ -144,34 +207,40 @@ fun TvButton(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.03f else 1f, tween(120), label = "btnScale")
-    val shape = RoundedCornerShape(12.dp)
+    val progress by animateFloatAsState(if (focused) 1f else 0f, FocusSpring, label = "btn")
+    val shape = RoundedCornerShape(14.dp)
     Row(
         modifier
-            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .graphicsLayer {
+                val s = 1f + 0.03f * progress
+                scaleX = s
+                scaleY = s
+            }
             .clip(shape)
-            .background(if (focused) Color.White else Color.White.copy(alpha = 0.09f))
+            .background(Color.White.copy(alpha = 0.06f + 0.14f * progress))
+            .border(1.dp, Color.White.copy(alpha = 0.16f * progress), shape)
             .dpadClickable(onClick)
             .onFocusChanged { focused = it.isFocused }
             .focusable()
-            .padding(horizontal = 20.dp, vertical = 13.dp),
+            .padding(horizontal = 22.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val fg = if (focused) Color(0xFF111114) else Color.White
+        val fg = Color.White.copy(alpha = 0.78f + 0.17f * progress)
         Text(
             text = text,
+            style = AiryText,
             color = fg,
             fontSize = 16.sp,
-            fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Normal,
+            fontWeight = if (focused) FontWeight.Medium else FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
         if (value != null) {
-            Text(value, color = fg.copy(alpha = 0.6f), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(value, style = AiryText, color = Palette.TextSecondary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (selected) {
-            Text("✓", color = fg, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 12.dp))
+            Text("✓", color = fg, fontSize = 16.sp, modifier = Modifier.padding(start = 12.dp))
         }
     }
 }

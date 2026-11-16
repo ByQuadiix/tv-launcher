@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -33,42 +34,34 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
     val jfServer = MutableStateFlow(prefs.jfServer)
     val jfMessage = MutableStateFlow<String?>(null)
     val quickConnectCode = MutableStateFlow<String?>(null)
-    val resume = MutableStateFlow<List<JfItem>>(emptyList())
-    val nextUp = MutableStateFlow<List<JfItem>>(emptyList())
-    val latest = MutableStateFlow<List<JfItem>>(emptyList())
-    val views = MutableStateFlow<List<JfItem>>(emptyList())
 
-    // Wetter
-    val weather = MutableStateFlow<Weather?>(null)
-    val weatherEnabled = MutableStateFlow(prefs.weatherEnabled)
-    val weatherCity = MutableStateFlow(prefs.weatherCity)
+    /**
+     * „Top Shelf“: erscheint oben nur, wenn Jellyfin im Dock ausgewählt ist.
+     * Reihenfolge: Weiterschauen, dann nächste Folgen, dann neu hinzugefügt (ohne Doppelte).
+     */
+    val shelf = MutableStateFlow<List<JfItem>>(emptyList())
+
+    /** Titel, dessen Bild und Infos oben gezeigt werden. */
+    val featured = MutableStateFlow<JfItem?>(null)
 
     // Hintergrund
     val wallpaperMode = MutableStateFlow(prefs.wallpaperMode)
     val wallpaperUrl = MutableStateFlow(prefs.wallpaperUrl)
-    val backdrop = MutableStateFlow<String?>(null)
-    /** Titel, der oben groß gezeigt wird (zuletzt ausgewählter Jellyfin-Titel). */
-    val featured = MutableStateFlow<JfItem?>(null)
 
     // Navigation
     val showSettings = MutableStateFlow(false)
-    /** Wird ausgelöst, wenn Home/Zurück gedrückt wird: Startseite nach oben scrollen. */
+    /** Wird ausgelöst, wenn Home/Zurück gedrückt wird: Startseite nach oben, erster Favorit. */
     val homeEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
-    private var lastWeather = 0L
-    private var backdropJob: Job? = null
+    private var featuredJob: Job? = null
     private var quickConnectJob: Job? = null
     private var jellyfinJob: Job? = null
-
     private var lastJellyfin = 0L
 
     fun onResume() {
         // App-Liste nur einmal laden; danach aktualisiert sie der Paket-Empfänger in MainActivity.
-        // (Früher bei jedem Zurückkehren: alle Banner neu dekodiert → Ruckler genau beim Home-Drücken.)
         if (apps.value.isEmpty()) refreshApps()
-        val now = System.currentTimeMillis()
-        if (now - lastJellyfin > 60_000L) refreshJellyfin()
-        if (now - lastWeather > 30 * 60_000L) refreshWeather()
+        if (System.currentTimeMillis() - lastJellyfin > 60_000L) refreshJellyfin()
     }
 
     // ---------- Apps & Favoriten ----------
@@ -78,8 +71,6 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
             apps.value = withContext(Dispatchers.IO) { AppRepository.load(getApplication()) }
         }
     }
-
-    fun isFavorite(pkg: String) = pkg in favorites.value
 
     fun toggleFavorite(pkg: String) {
         val list = favorites.value.toMutableList()
@@ -101,7 +92,9 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         favorites.value = list
     }
 
-    fun launchApp(context: Context, app: AppEntry) = startSafely(context, app.launchIntent)
+    /** [options] enthält die Zoom-Animation aus der Kachel heraus (siehe [scaleUpOptions]). */
+    fun launchApp(context: Context, app: AppEntry, options: Bundle? = null) =
+        startSafely(context, app.launchIntent, options)
 
     // ---------- Jellyfin ----------
 
@@ -111,24 +104,20 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         jellyfinJob?.cancel()
         jellyfinJob = viewModelScope.launch {
             try {
-                coroutineScope {
+                val items = coroutineScope {
                     val r = async { jf.resume() }
                     val n = async { jf.nextUp() }
                     val l = async { jf.latest() }
-                    val v = async { jf.views() }
-                    val res = r.await()
-                    val resIds = res.map { it.id }.toSet()
-                    resume.value = res
-                    nextUp.value = n.await().filter { it.id !in resIds }
-                    latest.value = l.await()
-                    views.value = v.await()
+                    val seen = HashSet<String>()
+                    (r.await() + n.await() + l.await()).filter { seen.add(it.id) }.take(30)
                 }
+                shelf.value = items
                 if (jfMessage.value?.startsWith("Jellyfin nicht") == true) jfMessage.value = null
-                if (featured.value == null) {
-                    val first = (resume.value + nextUp.value + latest.value).firstOrNull { it.backdropUrl != null }
-                    featured.value = first
-                    if (backdrop.value == null) backdrop.value = first?.backdropUrl
+                if (featured.value == null || items.none { it.id == featured.value?.id }) {
+                    featured.value = items.firstOrNull()
                 }
+                // Bilder schon jetzt laden, damit beim Durchblättern nichts nachlädt
+                Images.preload(getApplication(), items)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: HttpException) {
@@ -141,6 +130,21 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 jfMessage.value = "Jellyfin nicht erreichbar (${e.message ?: e.javaClass.simpleName})"
             }
+        }
+    }
+
+    /** Jellyfin-Kachel im Dock ausgewählt: oben den ersten Titel der Shelf zeigen. */
+    fun onJellyfinTileFocused() {
+        featuredJob?.cancel()
+        shelf.value.firstOrNull()?.let { featured.value = it }
+    }
+
+    /** Titel in der Shelf ausgewählt: Bild und Infos oben wechseln (kurz verzögert beim Durchblättern). */
+    fun onShelfItemFocused(item: JfItem) {
+        featuredJob?.cancel()
+        featuredJob = viewModelScope.launch {
+            delay(250)
+            featured.value = item
         }
     }
 
@@ -217,77 +221,24 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         jfLoggedIn.value = false
         jfUser.value = null
         jfMessage.value = null
-        resume.value = emptyList(); nextUp.value = emptyList()
-        latest.value = emptyList(); views.value = emptyList()
-        backdrop.value = null
+        shelf.value = emptyList()
         featured.value = null
     }
 
     /** Öffnet den Titel direkt in der offiziellen Jellyfin-App. */
-    fun openInJellyfin(context: Context, item: JfItem) {
+    fun openInJellyfin(context: Context, item: JfItem, options: Bundle? = null) {
         val intent = Intent()
             .setClassName(JELLYFIN_PKG, "$JELLYFIN_PKG.ui.startup.StartupActivity")
             .putExtra("ItemId", item.id)
             .putExtra("ItemIsUserView", item.isView)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         try {
-            context.startActivity(intent)
+            context.startActivity(intent, options)
         } catch (_: Exception) {
             val fallback = context.packageManager.getLeanbackLaunchIntentForPackage(JELLYFIN_PKG)
-            if (fallback != null) startSafely(context, fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            if (fallback != null) startSafely(context, fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), options)
             else Toast.makeText(context, "Die Jellyfin-App ist nicht installiert", Toast.LENGTH_LONG).show()
         }
-    }
-
-    fun onItemFocused(item: JfItem) {
-        if (item.isView) return
-        backdropJob?.cancel()
-        backdropJob = viewModelScope.launch {
-            delay(600) // erst wechseln, wenn man auf einem Titel stehen bleibt – nicht beim Durchblättern
-            featured.value = item
-            item.backdropUrl?.let { backdrop.value = it }
-        }
-    }
-
-    // ---------- Wetter ----------
-
-    fun refreshWeather() {
-        val lat = prefs.weatherLat
-        val lon = prefs.weatherLon
-        if (!prefs.weatherEnabled || lat == null || lon == null) {
-            weather.value = null
-            return
-        }
-        viewModelScope.launch {
-            try {
-                weather.value = WeatherClient.current(lat, lon, prefs.weatherCity ?: "")
-                lastWeather = System.currentTimeMillis()
-            } catch (_: Exception) {
-                // Beim nächsten Öffnen erneut versuchen
-            }
-        }
-    }
-
-    /** Liefert eine Fehlermeldung oder null bei Erfolg. */
-    suspend fun setWeatherCity(name: String): String? {
-        if (name.isBlank()) return "Bitte einen Ort eingeben"
-        val place = try {
-            WeatherClient.geocode(name)
-        } catch (e: Exception) {
-            return "Wetterdienst nicht erreichbar"
-        } ?: return "Ort „$name“ nicht gefunden"
-        prefs.weatherCity = place.name
-        prefs.weatherLat = place.lat
-        prefs.weatherLon = place.lon
-        weatherCity.value = place.name
-        refreshWeather()
-        return null
-    }
-
-    fun setWeatherEnabled(enabled: Boolean) {
-        prefs.weatherEnabled = enabled
-        weatherEnabled.value = enabled
-        refreshWeather()
     }
 
     // ---------- Hintergrund ----------
@@ -328,9 +279,9 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
     }
 }
 
-fun startSafely(context: Context, intent: Intent) {
+fun startSafely(context: Context, intent: Intent, options: Bundle? = null) {
     try {
-        context.startActivity(intent)
+        context.startActivity(intent, options)
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(context, "Kann nicht geöffnet werden", Toast.LENGTH_SHORT).show()
     } catch (_: SecurityException) {

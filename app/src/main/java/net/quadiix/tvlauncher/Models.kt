@@ -11,6 +11,8 @@ data class AppEntry(
     /** Normales App-Icon als Ersatz, wenn kein Banner existiert. */
     val icon: ImageBitmap?,
     val launchIntent: Intent,
+    /** Stark weichgezeichnete Mini-Fassung des Banners für den Ambient-Hintergrund. */
+    val ambient: ImageBitmap? = null,
 )
 
 data class JfItem(
@@ -37,13 +39,4 @@ data class JfItem(
     val remaining: String? = null,
     /** true, wenn im Kachelbild der Titel schon eingebaut ist (Jellyfin-"Thumb") – dann kein Logo darüberlegen. */
     val imageHasTitle: Boolean = false,
-)
-
-data class Weather(
-    val temp: Int,
-    val min: Int,
-    val max: Int,
-    val code: Int,
-    val isDay: Boolean,
-    val city: String,
 )
