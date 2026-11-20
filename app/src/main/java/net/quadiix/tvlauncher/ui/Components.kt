@@ -7,12 +7,18 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
@@ -44,19 +51,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
-// ---------------------------------------------------------------- Farben & Schrift (tvOS-artig)
+// ---------------------------------------------------------------- Farben & Schrift (tvOS / Mini-LED)
 
-/** Ruhige Graustufen statt hartem Schwarz-Weiß. */
+/** Ruhige Graustufen statt hartem Schwarz-Weiß – vermeidet Blooming auf dem Mini-LED-Panel. */
 object Palette {
     val Background = Color(0xFF121214)
-    val Surface = Color(0xFF1C1C1E)
-    val TextPrimary = Color.White.copy(alpha = 0.85f)
-    val TextSecondary = Color.White.copy(alpha = 0.60f)
+    val Surface = Color(0xFF1C1C20)
+    val SheetSurface = Color(0xEE18181C)
+    val TextPrimary = Color.White.copy(alpha = 0.90f)
+    val TextSecondary = Color.White.copy(alpha = 0.65f)
+    val TextMuted = Color.White.copy(alpha = 0.45f)
     val Glass = Color.White.copy(alpha = 0.08f)
-    val GlassEdge = Color.White.copy(alpha = 0.10f)
+    val GlassEdge = Color.White.copy(alpha = 0.14f)
+    val FocusRing = Color.White.copy(alpha = 0.72f)
 }
 
-/** Leicht erhöhter Zeichenabstand (0,02 em), keine schweren Fettschnitte. */
+/** Leicht erhöhter Zeichenabstand (0,02 em), klar lesbar aus 3 m Entfernung. */
 val AiryText = TextStyle(letterSpacing = 0.02.em)
 
 /** Nicht ausgewählte App-Banner leicht abdunkeln, damit grelle Logos die Ruhe nicht stören. */
@@ -71,8 +81,8 @@ val UnfocusedDim: ColorFilter = ColorFilter.colorMatrix(
     ).apply { timesAssign(ColorMatrix().apply { setToSaturation(0.85f) }) }
 )
 
-/** Gefederte Fokus-Animation ohne Nachschwingen (Spezifikation: NoBouncy, MediumLow). */
-private val FocusSpring = spring<Float>(
+/** Gefederte Fokus-Animation ohne Nachschwingen (NoBouncy, MediumLow). */
+val FocusSpring = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy,
     stiffness = Spring.StiffnessMediumLow,
 )
@@ -82,7 +92,7 @@ private val FocusSpring = spring<Float>(
 /**
  * OK-Taste der Fernbedienung: kurz drücken = [onClick], gedrückt halten (oder Menü-Taste) = [onLongClick].
  * Ein Loslassen ohne vorheriges Drücken auf demselben Element wird ignoriert, damit ein Tastendruck
- * nicht versehentlich in einem gerade geöffneten Dialog „durchklickt“.
+ * nicht versehentlich in einem gerade geöffneten Menü „durchklickt“.
  */
 fun Modifier.dpadClickable(
     onClick: () -> Unit,
@@ -129,12 +139,16 @@ fun Modifier.dpadClickable(
     }
 }
 
+private class BoundsHolder {
+    var rect: Rect = Rect.Zero
+}
+
 // ---------------------------------------------------------------- Kachel
 
 /**
- * Kachel im tvOS-Stil: Fokus nur über sanfte Vergrößerung (Feder), einen weichen Schlagschatten und
- * einen feinen hellen Innenrand – kein harter Rahmen. [onClick] bekommt die Position der Kachel auf dem
- * Bildschirm, damit eine App aus der Kachel heraus „aufgezoomt“ werden kann.
+ * Kachel im Apple-TV-Stil: gefederte Vergrößerung (1,08×), weicher Schatten und klar erkennbarer
+ * Lichtrand (auf hellen wie dunklen Bannern aus 3 m sofort sichtbar).
+ * [bounds] wird bewusst ohne Compose-State gespeichert, damit Scrollen keine Rekompositionen auslöst.
  */
 @Composable
 fun FocusCard(
@@ -146,24 +160,24 @@ fun FocusCard(
     onFocused: () -> Unit = {},
     onFocusChange: (Boolean) -> Unit = {},
     corner: Dp = 18.dp,
-    focusScale: Float = 1.07f,
+    focusScale: Float = 1.08f,
+    isMoving: Boolean = false,
     background: Color = Palette.Surface,
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    var bounds by remember { mutableStateOf(Rect.Zero) }
-    val progress by animateFloatAsState(if (focused) 1f else 0f, FocusSpring, label = "focus")
+    val bounds = remember { BoundsHolder() }
+    val targetScale = if (isMoving) focusScale + 0.03f else focusScale
+    val progress by animateFloatAsState(if (focused || isMoving) 1f else 0f, FocusSpring, label = "focus")
     val cardShape = remember(corner) { RoundedCornerShape(corner) }
-    val elevationPx = with(LocalDensity.current) { 22.dp.toPx() }
+    val elevationPx = with(LocalDensity.current) { 24.dp.toPx() }
 
     Box(
         modifier
             .size(width, height)
-            .onGloballyPositioned { bounds = it.boundsInRoot() }
-            // Alles über die GPU-Ebene: Skalierung und Schatten. Der Schatten entsteht nur an der
-            // ausgewählten Kachel (Elevation 0 = kein Schatten), damit die TV-GPU nicht überlastet wird.
+            .onGloballyPositioned { bounds.rect = it.boundsInRoot() }
             .graphicsLayer {
-                val s = 1f + (focusScale - 1f) * progress
+                val s = 1f + (targetScale - 1f) * progress
                 scaleX = s
                 scaleY = s
                 shadowElevation = elevationPx * progress
@@ -173,7 +187,7 @@ fun FocusCard(
                 clip = true
             }
             .then(if (background.alpha > 0f) Modifier.background(background) else Modifier)
-            .dpadClickable({ onClick(bounds) }, onLongClick)
+            .dpadClickable({ onClick(bounds.rect) }, onLongClick)
             .onFocusChanged {
                 if (focused != it.isFocused) onFocusChange(it.isFocused)
                 focused = it.isFocused
@@ -181,66 +195,293 @@ fun FocusCard(
             }
             .focusable(),
     ) {
-        content(focused)
-        // Feiner heller Innenrand (Specular Highlight) – nur sichtbar, solange die Kachel ausgewählt ist
+        content(focused || isMoving)
         if (progress > 0.02f) {
+            val borderColor = if (isMoving) {
+                Color.White.copy(alpha = 0.92f)
+            } else {
+                Palette.FocusRing.copy(alpha = 0.72f * progress)
+            }
             Box(
-                Modifier.matchParentSize()
-                    .border(1.5.dp, Color.White.copy(alpha = 0.18f * progress), cardShape)
+                Modifier
+                    .matchParentSize()
+                    .border(if (isMoving) 2.5.dp else 2.dp, borderColor, cardShape)
             )
         }
     }
 }
 
-// ---------------------------------------------------------------- Listenzeile
+// ---------------------------------------------------------------- Top-Bar Icon-Button
+
+/** Kompakter runder Glas-Knopf für die obere Leiste (z. B. Einstellungen, HDMI). */
+@Composable
+fun TvIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit = {},
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val progress by animateFloatAsState(if (focused) 1f else 0f, FocusSpring, label = "iconBtn")
+
+    Box(
+        modifier
+            .size(38.dp)
+            .graphicsLayer {
+                val s = 1f + 0.12f * progress
+                scaleX = s
+                scaleY = s
+            }
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.06f + 0.18f * progress))
+            .border(1.5.dp, Color.White.copy(alpha = 0.10f + 0.60f * progress), CircleShape)
+            .dpadClickable(onClick)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .focusable(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = Color.White.copy(alpha = 0.62f + 0.34f * progress),
+            modifier = Modifier.size(19.dp),
+        )
+    }
+}
+
+// ---------------------------------------------------------------- Kategorie-Pill (Top Shelf)
+
+/** Apple-TV-artige Segment-Pill für Jellyfin-Kategorien (Weitergucken / Als Nächstes / Neu). */
+@Composable
+fun TvCategoryPill(
+    text: String,
+    active: Boolean,
+    dimmed: Boolean = false,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit = {},
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val progress by animateFloatAsState(if (focused) 1f else 0f, FocusSpring, label = "pill")
+    val shape = remember { RoundedCornerShape(50) }
+
+    val bgAlpha = when {
+        focused -> 0.24f
+        active -> 0.14f
+        else -> 0.04f
+    }
+    val textAlpha = when {
+        focused -> 0.96f
+        active -> 0.90f
+        dimmed -> 0.36f
+        else -> 0.60f
+    }
+
+    Box(
+        modifier
+            .graphicsLayer {
+                val s = 1f + 0.05f * progress
+                scaleX = s
+                scaleY = s
+            }
+            .clip(shape)
+            .background(Color.White.copy(alpha = bgAlpha))
+            .border(
+                width = if (focused) 1.5.dp else 1.dp,
+                color = Color.White.copy(alpha = if (focused) 0.72f else if (active) 0.18f else 0.05f),
+                shape = shape,
+            )
+            .dpadClickable(onClick)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .focusable()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = AiryText,
+            fontSize = 14.sp,
+            fontWeight = if (active || focused) FontWeight.Medium else FontWeight.Normal,
+            color = Color.White.copy(alpha = textAlpha),
+            maxLines = 1,
+        )
+    }
+}
+
+// ---------------------------------------------------------------- Listenzeilen
 
 /**
- * Listenzeile für Menüs und Einstellungen. Ausgewählt: etwas heller und leicht vergrößert –
- * bewusst ohne harten Weiß-Schwarz-Kontrast. [value] steht rechtsbündig, [selected] zeigt ein Häkchen.
+ * Listenzeile für Menüs und Einstellungen mit optionalem Vektor-Icon, Wert und Auswahl-Häkchen.
  */
 @Composable
 fun TvButton(
     text: String,
     modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
     selected: Boolean = false,
+    active: Boolean = false,
     value: String? = null,
+    destructive: Boolean = false,
+    onFocused: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
     val progress by animateFloatAsState(if (focused) 1f else 0f, FocusSpring, label = "btn")
-    val shape = RoundedCornerShape(14.dp)
+    val shape = remember { RoundedCornerShape(14.dp) }
+    val baseFg = if (destructive) Color(0xFFFF7A7A) else Color.White
+    val fg = baseFg.copy(alpha = (if (active) 0.92f else 0.78f) + 0.18f * progress)
+    val bgAlpha = (if (active) 0.12f else 0.05f) + 0.15f * progress
+
     Row(
         modifier
             .graphicsLayer {
-                val s = 1f + 0.03f * progress
+                val s = 1f + 0.025f * progress
                 scaleX = s
                 scaleY = s
             }
             .clip(shape)
-            .background(Color.White.copy(alpha = 0.06f + 0.14f * progress))
-            .border(1.dp, Color.White.copy(alpha = 0.16f * progress), shape)
+            .background(Color.White.copy(alpha = bgAlpha))
+            .border(
+                width = if (focused) 1.5.dp else 1.dp,
+                color = Color.White.copy(alpha = if (focused) 0.58f else if (active) 0.14f else 0.04f),
+                shape = shape,
+            )
             .dpadClickable(onClick)
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
             .focusable()
-            .padding(horizontal = 22.dp, vertical = 14.dp),
+            .padding(horizontal = 18.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val fg = Color.White.copy(alpha = 0.78f + 0.17f * progress)
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(19.dp),
+            )
+            Spacer(Modifier.width(13.dp))
+        }
         Text(
             text = text,
             style = AiryText,
             color = fg,
-            fontSize = 16.sp,
-            fontWeight = if (focused) FontWeight.Medium else FontWeight.Normal,
+            fontSize = 15.5.sp,
+            fontWeight = if (focused || active) FontWeight.Medium else FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
         if (value != null) {
-            Text(value, style = AiryText, color = Palette.TextSecondary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                value,
+                style = AiryText,
+                color = Palette.TextSecondary,
+                fontSize = 14.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
         if (selected) {
-            Text("✓", color = fg, fontSize = 16.sp, modifier = Modifier.padding(start = 12.dp))
+            Spacer(Modifier.width(10.dp))
+            Icon(
+                imageVector = TvIcons.Check,
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+/** Listenzeile mit sauberem Ein/Aus-Schalter für die Einstellungen. */
+@Composable
+fun TvToggleButton(
+    text: String,
+    checked: Boolean,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    onToggle: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val progress by animateFloatAsState(if (focused) 1f else 0f, FocusSpring, label = "toggle")
+    val knob by animateFloatAsState(if (checked) 1f else 0f, FocusSpring, label = "knob")
+    val shape = remember { RoundedCornerShape(14.dp) }
+    val fg = Color.White.copy(alpha = 0.80f + 0.16f * progress)
+
+    Row(
+        modifier
+            .graphicsLayer {
+                val s = 1f + 0.025f * progress
+                scaleX = s
+                scaleY = s
+            }
+            .clip(shape)
+            .background(Color.White.copy(alpha = 0.05f + 0.15f * progress))
+            .border(
+                width = if (focused) 1.5.dp else 1.dp,
+                color = Color.White.copy(alpha = if (focused) 0.58f else 0.04f),
+                shape = shape,
+            )
+            .dpadClickable(onToggle)
+            .onFocusChanged { focused = it.isFocused }
+            .focusable()
+            .padding(horizontal = 18.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
+            Text(
+                text = text,
+                style = AiryText,
+                color = fg,
+                fontSize = 15.5.sp,
+                fontWeight = if (focused) FontWeight.Medium else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = AiryText,
+                    color = Palette.TextSecondary,
+                    fontSize = 13.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        // Schlanke Apple-TV-Schalter-Pille
+        val density = LocalDensity.current
+        val travelPx = with(density) { 18.dp.toPx() }
+        Box(
+            Modifier
+                .width(44.dp)
+                .height(26.dp)
+                .clip(CircleShape)
+                .background(
+                    if (checked) Color.White.copy(alpha = 0.82f)
+                    else Color.White.copy(alpha = 0.16f)
+                )
+                .padding(3.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(20.dp)
+                    .graphicsLayer { translationX = travelPx * knob }
+                    .clip(CircleShape)
+                    .background(if (checked) Palette.Background else Color.White.copy(alpha = 0.85f))
+            )
         }
     }
 }

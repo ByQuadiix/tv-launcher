@@ -3,6 +3,8 @@ package net.quadiix.tvlauncher
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ResolveInfo
+import android.graphics.Bitmap
+import android.graphics.Color as AndroidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
 
@@ -12,10 +14,10 @@ object AppRepository {
     fun load(context: Context): List<AppEntry> {
         val pm = context.packageManager
         val leanback = pm.queryIntentActivities(
-            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0
+            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0,
         )
         val normal = pm.queryIntentActivities(
-            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
+            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0,
         )
 
         val seen = HashSet<String>()
@@ -39,15 +41,52 @@ object AppRepository {
             } else null
             // Mini-Fassung für den weichgezeichneten Ambient-Hintergrund (einmalig hier im IO-Thread)
             val ambient = (bannerBmp ?: iconBmp)?.let { runCatching { Images.soften(it) }.getOrNull() }
+            val cardTint = iconBmp?.let { runCatching { extractCardTint(it) }.getOrNull() }
 
             result += AppEntry(
-                pkg, ri.loadLabel(pm).toString(),
-                bannerBmp?.asImageBitmap(), iconBmp?.asImageBitmap(), intent, ambient,
+                pkg = pkg,
+                label = ri.loadLabel(pm).toString(),
+                banner = bannerBmp?.asImageBitmap(),
+                icon = iconBmp?.asImageBitmap(),
+                launchIntent = intent,
+                ambient = ambient,
+                cardTint = cardTint,
             )
         }
 
         leanback.forEach { add(it, true) }
         normal.forEach { add(it, false) }
         return result.sortedBy { it.label.lowercase() }
+    }
+
+    /**
+     * Berechnet aus einem App-Icon eine ruhige, dunkle Kartenfarbe für Apps ohne TV-Banner.
+     * Läuft einmalig im IO-Thread → null GPU-Kosten zur Laufzeit.
+     */
+    private fun extractCardTint(bmp: Bitmap): Int {
+        val small = Bitmap.createScaledBitmap(bmp, 16, 16, true)
+        var rSum = 0L
+        var gSum = 0L
+        var bSum = 0L
+        var count = 0L
+        val pixels = IntArray(256)
+        small.getPixels(pixels, 0, 16, 0, 0, 16, 16)
+        for (px in pixels) {
+            val a = AndroidColor.alpha(px)
+            if (a < 128) continue
+            rSum += AndroidColor.red(px)
+            gSum += AndroidColor.green(px)
+            bSum += AndroidColor.blue(px)
+            count++
+        }
+        if (count == 0L) return 0xFF1E1E22.toInt()
+        val avgR = (rSum / count).toFloat()
+        val avgG = (gSum / count).toFloat()
+        val avgB = (bSum / count).toFloat()
+        // Ruhig mit dunklem Anthrazit (#1C1C20) mischen, damit kein schreiender Farbblock entsteht
+        val r = (0x1C * 0.72f + avgR * 0.28f).toInt().coerceIn(22, 72)
+        val g = (0x1C * 0.72f + avgG * 0.28f).toInt().coerceIn(22, 72)
+        val b = (0x20 * 0.72f + avgB * 0.28f).toInt().coerceIn(24, 78)
+        return AndroidColor.rgb(r, g, b)
     }
 }

@@ -12,6 +12,18 @@ class Prefs(context: Context) {
         get() = (sp.getString("favorites", DEFAULT_FAVORITES) ?: "").split('|').filter { it.isNotBlank() }
         set(v) = sp.edit { putString("favorites", v.joinToString("|")) }
 
+    var hiddenApps: Set<String>
+        get() = (sp.getString("hidden_apps", "") ?: "").split('|').filter { it.isNotBlank() }.toSet()
+        set(v) = sp.edit { putString("hidden_apps", v.joinToString("|")) }
+
+    var hideFavoritesInAllApps: Boolean
+        get() = sp.getBoolean("hide_favs_in_all_apps", true)
+        set(v) = sp.edit { putBoolean("hide_favs_in_all_apps", v) }
+
+    var showHdmiQuickAction: Boolean
+        get() = sp.getBoolean("show_hdmi_quick_action", false)
+        set(v) = sp.edit { putBoolean("show_hdmi_quick_action", v) }
+
     var jfServer: String
         get() = sp.getString("jf_server", DEFAULT_SERVER) ?: DEFAULT_SERVER
         set(v) = sp.edit { putString("jf_server", v) }

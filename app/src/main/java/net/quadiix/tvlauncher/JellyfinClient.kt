@@ -15,7 +15,7 @@ class JellyfinClient(private val prefs: Prefs) {
     private fun headers(withToken: Boolean = true): Map<String, String> {
         val device = (Build.MODEL ?: "Xiaomi TV").replace("\"", "")
         var h = "MediaBrowser Client=\"TV Launcher\", Device=\"$device\", " +
-            "DeviceId=\"${prefs.deviceId}\", Version=\"1.0.0\""
+            "DeviceId=\"${prefs.deviceId}\", Version=\"1.2.0\""
         val token = prefs.jfToken
         if (withToken && token != null) h += ", Token=\"$token\""
         return mapOf("Authorization" to h)
@@ -76,6 +76,11 @@ class JellyfinClient(private val prefs: Prefs) {
 
     suspend fun views(): List<JfItem> =
         items(JSONObject(get("/UserViews?userId=$uid")).optJSONArray("Items"), isView = true)
+
+    /** Markiert einen Titel in Jellyfin als gesehen (z. B. um ihn aus „Weitergucken“ zu entfernen). */
+    suspend fun markPlayed(itemId: String) {
+        httpRequest("$server/Users/$uid/PlayedItems/$itemId", method = "POST", headers = headers())
+    }
 
     private fun items(arr: JSONArray?, isView: Boolean = false): List<JfItem> {
         if (arr == null) return emptyList()

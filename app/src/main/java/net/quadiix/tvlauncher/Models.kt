@@ -13,6 +13,19 @@ data class AppEntry(
     val launchIntent: Intent,
     /** Stark weichgezeichnete Mini-Fassung des Banners für den Ambient-Hintergrund. */
     val ambient: ImageBitmap? = null,
+    /** Abgedunkelte Kartenfarbe (ARGB), abgeleitet vom Icon für Apps ohne Banner. */
+    val cardTint: Int? = null,
+)
+
+enum class ShelfCategory(val label: String) {
+    RESUME("Weitergucken"),
+    NEXT_UP("Als Nächstes"),
+    LATEST("Neu"),
+}
+
+data class TvInputEntry(
+    val id: String,
+    val label: String,
 )
 
 data class JfItem(

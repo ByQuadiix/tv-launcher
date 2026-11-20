@@ -19,27 +19,34 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+enum class NavEvent { HOME, BACK }
+
 class LauncherViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = Prefs(app)
     private val jf = JellyfinClient(prefs)
 
-    // Apps
+    // Apps & Einstellungen
     val apps = MutableStateFlow<List<AppEntry>>(emptyList())
     val favorites = MutableStateFlow(prefs.favorites)
+    val hiddenApps = MutableStateFlow(prefs.hiddenApps)
+    val hideFavoritesInAllApps = MutableStateFlow(prefs.hideFavoritesInAllApps)
+    val showHdmiQuickAction = MutableStateFlow(prefs.showHdmiQuickAction)
+    val tvInputs = MutableStateFlow<List<TvInputEntry>>(emptyList())
 
     // Jellyfin
     val jfLoggedIn = MutableStateFlow(prefs.jfToken != null && prefs.jfUserId != null)
     val jfUser = MutableStateFlow(prefs.jfUserName)
     val jfServer = MutableStateFlow(prefs.jfServer)
     val jfMessage = MutableStateFlow<String?>(null)
+    val jfLoading = MutableStateFlow(false)
     val quickConnectCode = MutableStateFlow<String?>(null)
 
-    /**
-     * „Top Shelf“: erscheint oben nur, wenn Jellyfin im Dock ausgewählt ist.
-     * Reihenfolge: Weiterschauen, dann nächste Folgen, dann neu hinzugefügt (ohne Doppelte).
-     */
-    val shelf = MutableStateFlow<List<JfItem>>(emptyList())
+    /** Getrennte Jellyfin-Kategorien für die Top Shelf. */
+    val jfResume = MutableStateFlow<List<JfItem>>(emptyList())
+    val jfNextUp = MutableStateFlow<List<JfItem>>(emptyList())
+    val jfLatest = MutableStateFlow<List<JfItem>>(emptyList())
+    val activeCategory = MutableStateFlow(ShelfCategory.RESUME)
 
     /** Titel, dessen Bild und Infos oben gezeigt werden. */
     val featured = MutableStateFlow<JfItem?>(null)
@@ -50,26 +57,38 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
 
     // Navigation
     val showSettings = MutableStateFlow(false)
-    /** Wird ausgelöst, wenn Home/Zurück gedrückt wird: Startseite nach oben, erster Favorit. */
-    val homeEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /** Home- oder Zurück-Taste von der Activity, wird kontextabhängig im UI behandelt. */
+    val navEvents = MutableSharedFlow<NavEvent>(extraBufferCapacity = 2)
 
     private var featuredJob: Job? = null
     private var quickConnectJob: Job? = null
     private var jellyfinJob: Job? = null
     private var lastJellyfin = 0L
+    private var categorySelectedManually = false
 
     fun onResume() {
         // App-Liste nur einmal laden; danach aktualisiert sie der Paket-Empfänger in MainActivity.
         if (apps.value.isEmpty()) refreshApps()
+        if (tvInputs.value.isEmpty()) refreshTvInputs()
         if (System.currentTimeMillis() - lastJellyfin > 60_000L) refreshJellyfin()
     }
 
-    // ---------- Apps & Favoriten ----------
+    // ---------- Apps, Favoriten & Ausblenden ----------
 
     fun refreshApps() {
         viewModelScope.launch {
             apps.value = withContext(Dispatchers.IO) { AppRepository.load(getApplication()) }
         }
+    }
+
+    fun refreshTvInputs() {
+        viewModelScope.launch {
+            tvInputs.value = withContext(Dispatchers.IO) { TvInputs.load(getApplication()) }
+        }
+    }
+
+    fun openTvInput(context: Context, input: TvInputEntry) {
+        TvInputs.open(context, input)
     }
 
     fun toggleFavorite(pkg: String) {
@@ -87,6 +106,31 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         saveFavorites(list)
     }
 
+    fun hideApp(pkg: String) {
+        val nextHidden = hiddenApps.value + pkg
+        prefs.hiddenApps = nextHidden
+        hiddenApps.value = nextHidden
+        if (pkg in favorites.value) {
+            saveFavorites(favorites.value.filterNot { it == pkg })
+        }
+    }
+
+    fun unhideApp(pkg: String) {
+        val nextHidden = hiddenApps.value - pkg
+        prefs.hiddenApps = nextHidden
+        hiddenApps.value = nextHidden
+    }
+
+    fun setHideFavoritesInAllApps(hide: Boolean) {
+        prefs.hideFavoritesInAllApps = hide
+        hideFavoritesInAllApps.value = hide
+    }
+
+    fun setShowHdmiQuickAction(show: Boolean) {
+        prefs.showHdmiQuickAction = show
+        showHdmiQuickAction.value = show
+    }
+
     private fun saveFavorites(list: List<String>) {
         prefs.favorites = list
         favorites.value = list
@@ -98,26 +142,55 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- Jellyfin ----------
 
+    fun itemsFor(category: ShelfCategory): List<JfItem> = when (category) {
+        ShelfCategory.RESUME -> jfResume.value
+        ShelfCategory.NEXT_UP -> jfNextUp.value
+        ShelfCategory.LATEST -> jfLatest.value
+    }
+
+    fun hasAnyShelfItems(): Boolean =
+        jfResume.value.isNotEmpty() || jfNextUp.value.isNotEmpty() || jfLatest.value.isNotEmpty()
+
     fun refreshJellyfin() {
         if (!jfLoggedIn.value) return
         lastJellyfin = System.currentTimeMillis()
         jellyfinJob?.cancel()
         jellyfinJob = viewModelScope.launch {
+            jfLoading.value = true
             try {
-                val items = coroutineScope {
-                    val r = async { jf.resume() }
-                    val n = async { jf.nextUp() }
-                    val l = async { jf.latest() }
-                    val seen = HashSet<String>()
-                    (r.await() + n.await() + l.await()).filter { seen.add(it.id) }.take(30)
+                val (rList, nList, lList) = coroutineScope {
+                    val r = async { jf.resume().distinctBy { it.id }.take(20) }
+                    val n = async { jf.nextUp().distinctBy { it.id }.take(20) }
+                    val l = async { jf.latest().distinctBy { it.id }.take(24) }
+                    Triple(r.await(), n.await(), l.await())
                 }
-                shelf.value = items
+                jfResume.value = rList
+                jfNextUp.value = nList
+                jfLatest.value = lList
                 if (jfMessage.value?.startsWith("Jellyfin nicht") == true) jfMessage.value = null
-                if (featured.value == null || items.none { it.id == featured.value?.id }) {
-                    featured.value = items.firstOrNull()
+
+                // Falls noch keine Kategorie gewählt oder die aktive leer ist, erste gefüllte wählen
+                val currentItems = itemsFor(activeCategory.value)
+                if (!categorySelectedManually || currentItems.isEmpty()) {
+                    val best = when {
+                        rList.isNotEmpty() -> ShelfCategory.RESUME
+                        nList.isNotEmpty() -> ShelfCategory.NEXT_UP
+                        lList.isNotEmpty() -> ShelfCategory.LATEST
+                        else -> activeCategory.value
+                    }
+                    activeCategory.value = best
                 }
-                // Bilder schon jetzt laden, damit beim Durchblättern nichts nachlädt
-                Images.preload(getApplication(), items)
+
+                val activeList = itemsFor(activeCategory.value)
+                if (featured.value == null || activeList.none { it.id == featured.value?.id }) {
+                    featured.value = activeList.firstOrNull()
+                        ?: rList.firstOrNull()
+                        ?: nList.firstOrNull()
+                        ?: lList.firstOrNull()
+                }
+                // Bilder vorab laden, damit beim Kategorie-Wechsel und Blättern nichts nachlädt
+                val all = (rList.take(10) + nList.take(10) + lList.take(10)).distinctBy { it.id }
+                Images.preload(getApplication(), all)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: HttpException) {
@@ -129,14 +202,35 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 jfMessage.value = "Jellyfin nicht erreichbar (${e.message ?: e.javaClass.simpleName})"
+            } finally {
+                jfLoading.value = false
             }
         }
     }
 
-    /** Jellyfin-Kachel im Dock ausgewählt: oben den ersten Titel der Shelf zeigen. */
+    fun selectCategory(category: ShelfCategory, immediateFeature: Boolean = false) {
+        categorySelectedManually = true
+        if (activeCategory.value == category && !immediateFeature) return
+        activeCategory.value = category
+        val first = itemsFor(category).firstOrNull()
+        featuredJob?.cancel()
+        if (immediateFeature) {
+            if (first != null) featured.value = first
+        } else if (first != null) {
+            featuredJob = viewModelScope.launch {
+                delay(180)
+                featured.value = first
+            }
+        }
+    }
+
+    /** Jellyfin-Kachel im Dock ausgewählt: oben den ersten Titel der aktiven Kategorie zeigen. */
     fun onJellyfinTileFocused() {
         featuredJob?.cancel()
-        shelf.value.firstOrNull()?.let { featured.value = it }
+        val list = itemsFor(activeCategory.value)
+        if (featured.value == null || list.none { it.id == featured.value?.id }) {
+            list.firstOrNull()?.let { featured.value = it }
+        }
     }
 
     /** Titel in der Shelf ausgewählt: Bild und Infos oben wechseln (kurz verzögert beim Durchblättern). */
@@ -145,6 +239,24 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         featuredJob = viewModelScope.launch {
             delay(250)
             featured.value = item
+        }
+    }
+
+    /** Markiert einen Titel auf dem Jellyfin-Server als gesehen und aktualisiert die Listen. */
+    fun markPlayed(context: Context, item: JfItem) {
+        viewModelScope.launch {
+            try {
+                jf.markPlayed(item.id)
+                jfResume.value = jfResume.value.filterNot { it.id == item.id }
+                jfNextUp.value = jfNextUp.value.filterNot { it.id == item.id }
+                if (featured.value?.id == item.id) {
+                    featured.value = itemsFor(activeCategory.value).firstOrNull()
+                }
+                Toast.makeText(context, "Als gesehen markiert", Toast.LENGTH_SHORT).show()
+                refreshJellyfin()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Fehlgeschlagen: ${e.message ?: "Fehler"}", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -211,6 +323,7 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         jfUser.value = a.userName
         jfLoggedIn.value = true
         jfMessage.value = "Angemeldet als ${a.userName}"
+        categorySelectedManually = false
         refreshJellyfin()
     }
 
@@ -221,8 +334,11 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         jfLoggedIn.value = false
         jfUser.value = null
         jfMessage.value = null
-        shelf.value = emptyList()
+        jfResume.value = emptyList()
+        jfNextUp.value = emptyList()
+        jfLatest.value = emptyList()
         featured.value = null
+        categorySelectedManually = false
     }
 
     /** Öffnet den Titel direkt in der offiziellen Jellyfin-App. */
@@ -257,6 +373,7 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- Navigation ----------
 
     fun openSettings() {
+        refreshTvInputs()
         showSettings.value = true
     }
 
@@ -266,12 +383,12 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun onBack() {
-        if (showSettings.value) closeSettings() else homeEvents.tryEmit(Unit)
+        navEvents.tryEmit(NavEvent.BACK)
     }
 
     fun onHomePressed() {
         closeSettings()
-        homeEvents.tryEmit(Unit)
+        navEvents.tryEmit(NavEvent.HOME)
     }
 
     companion object {

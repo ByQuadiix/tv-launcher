@@ -3,16 +3,19 @@
 Werbefreier Launcher für den Xiaomi TV S Mini LED 2025 (Google TV, Android 14) mit Jellyfin auf der Startseite.
 
 ## Funktionen
-Design nach der tvOS-Spezifikation (eigene Umsetzung, keine Apple-Grafiken oder -Schriften):
-- **Aufbau:** obere ~60 % frei für den Hintergrund, unten nur Dock und Apps. Die ausgewählte Reihe steht
-  immer auf derselben Höhe, Reihen darüber blenden aus – höchstens 1–2 Reihen sichtbar.
-- **Top Shelf:** Nur wenn Jellyfin im Dock ausgewählt ist, erscheinen oben Logo, Infos und eine Reihe
-  „Weiterschauen & Neu“ (Weiterschauen, nächste Folgen, neu hinzugefügt). Ein Klick öffnet den Titel in der Jellyfin-App.
+Design im Apple-TV-/tvOS-Stil (eigene Umsetzung, optimiert für 55" QD-Mini LED & MT5896):
+- **Zweistufiger Aufbau:** Im Dock bleiben die oberen ~60 % frei für Hintergrund bzw. Top Shelf. Beim
+  Runterscrollen in „Apps“ gleitet das Dock nach oben weg und gibt den ganzen Bildschirm für das
+  symmetrische 5-Spalten-App-Raster (3+ Reihen gleichzeitig) frei.
+- **Jellyfin Top Shelf mit Kategorien:** Nur wenn Jellyfin im Dock fokussiert ist, erscheinen oben
+  Logo, Infos und die getrennten Kategorien **Weitergucken**, **Als Nächstes** und **Neu**. Ein Klick
+  öffnet den Titel direkt in der Jellyfin-App; „OK lang drücken“ bietet u. a. „Als gesehen markieren“.
 - **Ambient-Hintergrund:** bei anderen Apps eine stark weichgezeichnete, entsättigte Fassung der ausgewählten Kachel.
-- **Milchglas-Dock** mit den Favoriten (OK lang drücken → hinzufügen, verschieben, App-Info, Deinstallieren).
-- **Fokus ohne Rahmen:** gefederte Vergrößerung (1,07×), weicher Schatten, feiner Lichtrand; nicht ausgewählte
-  Banner leicht abgedunkelt; App-Namen nur unter der ausgewählten Kachel (60 %).
-- **Statusleiste:** nur eine dezente Uhr. Einstellungen über die Kachel am Ende der Apps oder „OK lang drücken“.
+- **Milchglas-Dock & Live-Sortierung:** Favoriten lassen sich über das rechte Seitenmenü („OK lang drücken“)
+  live mit ◀ ▶ im Dock verschieben; ungenutzte Apps können ausgeblendet werden.
+- **10-Foot-Fokus & Lesbarkeit:** gefederte Vergrößerung (1,08×), weicher Schatten, klar erkennbarer
+  Lichtrand; getönte Kacheln für Apps ohne TV-Banner; gut lesbare Typografie aus 3 m Entfernung.
+- **Dezente obere Leiste:** Uhrzeit + schneller Zugriff auf die 2-Spalten-Einstellungen (und optional HDMI-Eingänge).
 - **Zoom beim App-Start** aus der Kachel heraus; Bilder der Shelf werden vorab geladen.
 - Anmeldung bei Jellyfin per **Quick Connect** oder Benutzername/Passwort.
 
@@ -80,11 +83,12 @@ Fernbedienung wird abgefangen.
 | Datei | Inhalt |
 |---|---|
 | `MainActivity.kt` | Launcher-Activity, Zurück-/Home-Taste, App-Änderungen |
-| `LauncherViewModel.kt` | Zustand, Favoriten, Jellyfin-/Wetter-Abruf |
-| `JellyfinClient.kt` | Jellyfin-REST-API (Login, Quick Connect, Resume, NextUp, Latest, Views) |
-| `WeatherClient.kt` | Open-Meteo Geocoding + Wetter |
-| `AppRepository.kt` | installierte Apps mit TV-Bannern |
+| `LauncherViewModel.kt` | Zustand, Favoriten, ausgeblendete Apps, Jellyfin-Kategorien, HDMI-Eingänge |
+| `JellyfinClient.kt` | Jellyfin-REST-API (Login, Quick Connect, Resume, NextUp, Latest, MarkPlayed) |
+| `AppRepository.kt` | installierte Apps mit TV-Bannern und abgeleiteter Kartenfarbe |
+| `TvInputs.kt` | HDMI-/Hardware-Eingänge über den Android-TV-Input-Dienst |
 | `HomeKeyService.kt` | Bedienungshilfe für die Home-Taste |
-| `ui/HomeScreen.kt` | Startseite, Kacheln, App-Menü |
-| `ui/SettingsScreen.kt` | Einstellungen |
-| `ui/Components.kt` | Fernbedienungs-Bedienelemente (Fokus, OK lang drücken) |
+| `ui/HomeScreen.kt` | Startseite, Kategorie-Shelf, Milchglas-Dock, App-Raster, Seitenmenüs |
+| `ui/SettingsScreen.kt` | 2-Spalten-Einstellungen |
+| `ui/Components.kt` | Fernbedienungs-Bedienelemente (Fokus, OK lang drücken, Schalter, Kategorie-Pills) |
+| `ui/Icons.kt` | schlanke Vektor-Icons für die TV-Oberfläche |
